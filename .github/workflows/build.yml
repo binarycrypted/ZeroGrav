@@ -2,16 +2,19 @@ name: Build Tweak
 on: [push, workflow_dispatch]
 jobs:
   build:
-    runs-on: macos-latest
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Setup Theos and SDK
+      - name: Setup Theos, Toolchain and SDK
         run: |
-          git clone --recursive https://github.com ~/theos
-          mkdir -p ~/theos/sdks
-          curl -L https://github.com -o sdks.zip
-          unzip -q sdks.zip "sdks-master/iPhoneOS9.3.sdk/*" -d ~/theos/sdks/
-          mv ~/theos/sdks/sdks-master/iPhoneOS9.3.sdk ~/theos/sdks/
+          sudo apt-get update && sudo apt-get install -y fakeroot dpkg-dev xz-utils
+          git clone --depth=1 --recursive https://github.com ~/theos
+          mkdir -p ~/theos/toolchain/linux/iphone
+          URL=$(curl -s https://github.com | grep "browser_download_url.*linux.*tar" | cut -d '"' -f 4)
+          curl -L "$URL" -o tc.tar.xz && tar -xf tc.tar.xz -C ~/theos/toolchain/linux/iphone --strip-components=1
+          git clone --depth=1 --filter=blob:none --sparse https://github.com ~/sdks-tmp
+          cd ~/sdks-tmp && git sparse-checkout set iPhoneOS9.3.sdk
+          mkdir -p ~/theos/sdks && mv ~/sdks-tmp/iPhoneOS9.3.sdk ~/theos/sdks/
       - name: Build Package
         run: |
           export THEOS=~/theos
