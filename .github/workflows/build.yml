@@ -5,28 +5,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Setup Theos, Toolchain and SDK
-        run: |
-          sudo apt-get update && sudo apt-get install -y fakeroot dpkg-dev xz-utils
-          H="https://""github.com"
-          git clone --depth=1 --recursive "$H/theos/theos.git" ~/theos
-          mkdir -p ~/theos/toolchain
-          URL=$(curl -s "https://""://github.com" | grep "browser_download_url.*linux" | cut -d '"' -f 4 | head -n 1)
-          curl -L "$URL" -o tc.tar && tar -xf tc.tar -C ~/theos/toolchain/
-          if [ ! -f ~/theos/toolchain/linux/iphone/bin/clang ]; then
-            CLANG_PATH=$(find ~/theos/toolchain -name "clang" -type f | head -n 1)
-            BIN_DIR=$(dirname "$CLANG_PATH")
-            ROOT_DIR=$(dirname "$BIN_DIR")
-            mkdir -p ~/theos/toolchain/linux
-            ln -s "$ROOT_DIR" ~/theos/toolchain/linux/iphone
-          fi
-          git clone --depth=1 --filter=blob:none --sparse "$H/theos/sdks.git" ~/sdks-tmp
-          cd ~/sdks-tmp && git sparse-checkout set iPhoneOS9.3.sdk
-          mkdir -p ~/theos/sdks && mv ~/sdks-tmp/iPhoneOS9.3.sdk ~/theos/sdks/
+      - name: Setup Theos
+        uses: erik-smit/theos-action@v1
+        with:
+          sdks: 'iPhoneOS9.3.sdk'
       - name: Build Package
-        run: |
-          export THEOS=~/theos
-          make package FINALPACKAGE=1
+        run: make package FINALPACKAGE=1
       - name: Upload DEB
         uses: actions/upload-artifact@v4
         with:
