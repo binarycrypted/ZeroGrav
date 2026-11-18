@@ -5,6 +5,7 @@
 @end
 
 @interface SBIconListView : UIView
+- (void)layoutIconsNow;
 @end
 
 static BOOL isZeroGravActive = NO;
@@ -12,7 +13,8 @@ static UIDynamicAnimator *animator = nil;
 static UIGravityBehavior *gravity = nil;
 static CMMotionManager *motionManager = nil;
 static NSMutableDictionary *originalCenters = nil;
-static __weak UIView *activeContainer = nil;
+static __weak SBIconListView *activeContainer = nil;
+static NSTimeInterval lastShakeTime = 0;
 
 static SBIconListView* findIconListView(UIView *view) {
     if ([view isKindOfClass:NSClassFromString(@"SBIconListView")] && view.window != nil && !view.hidden && view.alpha > 0.1) {
@@ -30,7 +32,13 @@ static SBIconListView* findIconListView(UIView *view) {
 
 static void toggleZeroGrav(void) {
     if (!isZeroGravActive) {
-        UIWindow *keyWin = [UIApplication sharedApplication].keyWindow;
+        UIWindow *keyWin = nil;
+        for (UIWindow *w in [UIApplication sharedApplication].windows) {
+            if (!w.hidden && w.alpha > 0.1 && findIconListView(w) != nil) {
+                keyWin = w;
+                break;
+            }
+        }
         SBIconListView *listView = findIconListView(keyWin);
         if (!listView) return;
 
@@ -47,6 +55,8 @@ static void toggleZeroGrav(void) {
         if (icons.count == 0) return;
 
         activeContainer = listView;
+        isZeroGravActive = YES;
+
         animator = [[UIDynamicAnimator alloc] initWithReferenceView:listView];
 
         UICollisionBehavior *collision = [[UICollisionBehavior alloc] initWithItems:icons];
@@ -54,27 +64,20 @@ static void toggleZeroGrav(void) {
         [animator addBehavior:collision];
 
         UIDynamicItemBehavior *itemBehavior = [[UIDynamicItemBehavior alloc] initWithItems:icons];
-        itemBehavior.elasticity = 0.65;
-        itemBehavior.friction = 0.05;
-        itemBehavior.resistance = 0.15;
+        itemBehavior.elasticity = 0.75;
+        itemBehavior.friction = 0.02;
+        itemBehavior.resistance = 0.05;
         [animator addBehavior:itemBehavior];
 
         gravity = [[UIGravityBehavior alloc] initWithItems:icons];
-        gravity.gravityDirection = CGVectorMake(0.0, 0.0);
+        gravity.gravityDirection = CGVectorMake(0.0, 0.2);
         [animator addBehavior:gravity];
 
-        motionManager = [[CMMotionManager alloc] init];
-        motionManager.accelerometerUpdateInterval = 0.03;
-        [motionManager startAccelerometerUpdatesToQueue:[NSOperationQueue mainQueue] withHandler:^(CMAccelerometerData *data, NSError *error) {
-            if (data && gravity) {
-                gravity.gravityDirection = CGVectorMake(data.acceleration.x * 1.4, -data.acceleration.y * 1.4);
-            }
-        }];
-
-        isZeroGravActive = YES;
+        UIPushBehavior *push = [[UIPushBehavior alloc] initWithItems:icons mode:UIPushBehaviorModeInstantaneous];
+        push.pushDirection = CGVectorMake(0.0, -0.6);
+        [animator addBehavior:push];
     } else {
-        [motionManager stopAccelerometerUpdates];
-        motionManager = nil;
+        isZeroGravActive = NO;
         [animator removeAllBehaviors];
         animator = nil;
         gravity = nil;
@@ -89,17 +92,71 @@ static void toggleZeroGrav(void) {
                         sub.center = [centerVal CGPointValue];
                     }
                 }
+            } completion:^(BOOL finished) {
+                [activeContainer layoutIconsNow];
+                activeContainer = nil;
             }];
         }
-        isZeroGravActive = NO;
     }
 }
 
-%hook UIWindow
-- (void)motionEnded:(UIEventSubtype)motion withEvent:(UIEvent *)event {
+%hook SpringBoard
+- (void)applicationDidFinishLaunching:(id)application {
     %orig;
-    if (motion == UIEventSubtypeMotionShake) {
-        toggleZeroGrav();
+    motionManager = [[CMMotionManager alloc] init];
+    motionManager.accelerometerUpdateInterval = 0.02;
+    [motionManager startAccelerometerUpdatesToQueue:[NSOperationQueue mainQueue] withHandler:^(CMAccelerometerData *data, NSError *error) {
+        if (!data) return;
+        double x = data.acceleration.x;
+        double y = data.acceleration.y;
+        double z = data.acceleration.z;
+        double magnitude = sqrt(x*x + y*y + z*z);
+
+        if (magnitude > 2.2) {
+            NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
+            if (now - lastShakeTime > 1.2) {
+                lastShakeTime = now;
+                toggleZeroGrav();
+            }
+        }
+
+        if (isZeroGravActive && gravity) {
+            gravity.gravityDirection = CGVectorMake(x * 2.2, -y * 2.2);
+        }
+    }];
+}
+%end
+
+%hook SBIconListView
+- (void)layoutSubviews {
+    if (isZeroGravActive && self == activeContainer) return;
+    %orig;
+}
+
+- (void)layoutIconsNow {
+    if (isZeroGravActive && self == activeContainer) return;
+    %orig;
+}
+
+- (void)didMoveToWindow {
+    %orig;
+    BOOL hasDoubleTap = NO;
+    for (UIGestureRecognizer *gr in self.gestureRecognizers) {
+        if ([gr isKindOfClass:[UITapGestureRecognizer class]] && ((UITapGestureRecognizer *)gr).numberOfTapsRequired == 2) {
+            hasDoubleTap = YES;
+            break;
+        }
     }
+    if (!hasDoubleTap) {
+        UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(zg_handleDoubleTap)];
+        tap.numberOfTapsRequired = 2;
+        tap.cancelsTouchesInView = NO;
+        [self addGestureRecognizer:tap];
+    }
+}
+
+%new
+- (void)zg_handleDoubleTap {
+    toggleZeroGrav();
 }
 %end
