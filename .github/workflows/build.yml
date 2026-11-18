@@ -8,11 +8,12 @@ jobs:
       - name: Setup Theos, Toolchain and SDK
         run: |
           sudo apt-get update && sudo apt-get install -y fakeroot dpkg-dev xz-utils
-          git clone --depth=1 --recursive https://github.com ~/theos
+          H="https://""github.com"
+          git clone --depth=1 --recursive "$H/theos/theos.git" ~/theos
           mkdir -p ~/theos/toolchain/linux/iphone
-          URL=$(curl -s https://github.com | grep "browser_download_url.*linux.*tar" | cut -d '"' -f 4)
+          URL=$(curl -s "https://""://github.com" | grep "browser_download_url.*linux.*tar" | cut -d '"' -f 4)
           curl -L "$URL" -o tc.tar.xz && tar -xf tc.tar.xz -C ~/theos/toolchain/linux/iphone --strip-components=1
-          git clone --depth=1 --filter=blob:none --sparse https://github.com ~/sdks-tmp
+          git clone --depth=1 --filter=blob:none --sparse "$H/theos/sdks.git" ~/sdks-tmp
           cd ~/sdks-tmp && git sparse-checkout set iPhoneOS9.3.sdk
           mkdir -p ~/theos/sdks && mv ~/sdks-tmp/iPhoneOS9.3.sdk ~/theos/sdks/
       - name: Build Package
