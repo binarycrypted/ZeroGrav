@@ -1,0 +1,9 @@
+Package: com.hacker.zerograv
+Name: ZeroGrav
+Depends: mobilesubstrate
+Version: 1.0.0
+Architecture: iphoneos-arm
+Description: Shake to float icons like water in zero gravity!
+Maintainer: Hacker
+Author: Hacker
+Section: Tweaks
