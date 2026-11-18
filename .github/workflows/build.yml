@@ -4,11 +4,12 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
       - name: Setup Theos
-        uses: erik-smit/theos-action@v1
+        uses: waruhachi/theos-action@v2.6.6
         with:
-          sdks: 'iPhoneOS9.3.sdk'
+          sdks-src: 'theos/sdks'
       - name: Build Package
         run: make package FINALPACKAGE=1
       - name: Upload DEB
