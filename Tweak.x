@@ -12,89 +12,110 @@ static BOOL isZeroGravActive = NO;
 static UIDynamicAnimator *animator = nil;
 static UIGravityBehavior *gravity = nil;
 static CMMotionManager *motionManager = nil;
-static NSMutableDictionary *originalCenters = nil;
-static __weak SBIconListView *activeContainer = nil;
+static NSMutableArray *floatingIcons = nil;
+static NSMutableDictionary *originalParents = nil;
+static NSMutableDictionary *originalFrames = nil;
 static NSTimeInterval lastShakeTime = 0;
 
-static SBIconListView* findIconListView(UIView *view) {
-    if ([view isKindOfClass:NSClassFromString(@"SBIconListView")] && view.window != nil && !view.hidden && view.alpha > 0.1) {
+static void collectVisibleIcons(UIView *view, NSMutableArray *result) {
+    if (view.hidden || view.alpha < 0.1) return;
+    if ([view isKindOfClass:NSClassFromString(@"SBIconView")]) {
         CGRect frameInWin = [view convertRect:view.bounds toView:nil];
-        if (CGRectIntersectsRect(frameInWin, [UIScreen mainScreen].bounds) && view.subviews.count > 1) {
-            return (SBIconListView *)view;
+        if (CGRectIntersectsRect(frameInWin, [UIScreen mainScreen].bounds)) {
+            [result addObject:view];
         }
+        return;
     }
-    for (UIView *sub in view.subviews) {
-        SBIconListView *found = findIconListView(sub);
-        if (found) return found;
+    for (UIView *sub in [view.subviews copy]) {
+        collectVisibleIcons(sub, result);
     }
-    return nil;
 }
 
 static void toggleZeroGrav(void) {
+    UIWindow *keyWin = nil;
+    for (UIWindow *w in [UIApplication sharedApplication].windows) {
+        if (!w.hidden && w.alpha > 0.1 && [NSStringFromClass([w class]) containsString:@"HomeScreen"]) {
+            keyWin = w;
+            break;
+        }
+    }
+    if (!keyWin) keyWin = [UIApplication sharedApplication].keyWindow;
+    if (!keyWin) return;
+
     if (!isZeroGravActive) {
-        UIWindow *keyWin = nil;
-        for (UIWindow *w in [UIApplication sharedApplication].windows) {
-            if (!w.hidden && w.alpha > 0.1 && findIconListView(w) != nil) {
-                keyWin = w;
-                break;
-            }
-        }
-        SBIconListView *listView = findIconListView(keyWin);
-        if (!listView) return;
-
         NSMutableArray *icons = [NSMutableArray array];
-        originalCenters = [NSMutableDictionary dictionary];
-
-        for (UIView *sub in listView.subviews) {
-            if ([sub isKindOfClass:NSClassFromString(@"SBIconView")]) {
-                [icons addObject:sub];
-                NSValue *key = [NSValue valueWithPointer:(__bridge const void *)(sub)];
-                originalCenters[key] = [NSValue valueWithCGPoint:sub.center];
-            }
-        }
+        collectVisibleIcons(keyWin, icons);
         if (icons.count == 0) return;
 
-        activeContainer = listView;
-        isZeroGravActive = YES;
+        floatingIcons = icons;
+        originalParents = [NSMutableDictionary dictionary];
+        originalFrames = [NSMutableDictionary dictionary];
 
-        animator = [[UIDynamicAnimator alloc] initWithReferenceView:listView];
+        for (UIView *icon in icons) {
+            NSValue *key = [NSValue valueWithPointer:(__bridge const void *)(icon)];
+            if (icon.superview) {
+                originalParents[key] = icon.superview;
+                originalFrames[key] = [NSValue valueWithCGRect:icon.frame];
+                CGRect winFrame = [icon convertRect:icon.bounds toView:keyWin];
+                icon.translatesAutoresizingMaskIntoConstraints = YES;
+                [icon removeFromSuperview];
+                icon.frame = winFrame;
+                [keyWin addSubview:icon];
+            }
+        }
+
+        isZeroGravActive = YES;
+        animator = [[UIDynamicAnimator alloc] initWithReferenceView:keyWin];
 
         UICollisionBehavior *collision = [[UICollisionBehavior alloc] initWithItems:icons];
         collision.translatesReferenceBoundsIntoBoundary = YES;
         [animator addBehavior:collision];
 
         UIDynamicItemBehavior *itemBehavior = [[UIDynamicItemBehavior alloc] initWithItems:icons];
-        itemBehavior.elasticity = 0.75;
+        itemBehavior.elasticity = 0.72;
         itemBehavior.friction = 0.02;
-        itemBehavior.resistance = 0.05;
+        itemBehavior.resistance = 0.04;
         [animator addBehavior:itemBehavior];
 
         gravity = [[UIGravityBehavior alloc] initWithItems:icons];
-        gravity.gravityDirection = CGVectorMake(0.0, 0.2);
+        gravity.gravityDirection = CGVectorMake(0.0, 1.2);
         [animator addBehavior:gravity];
 
-        UIPushBehavior *push = [[UIPushBehavior alloc] initWithItems:icons mode:UIPushBehaviorModeInstantaneous];
-        push.pushDirection = CGVectorMake(0.0, -0.6);
-        [animator addBehavior:push];
+        for (UIView *icon in icons) {
+            UIPushBehavior *push = [[UIPushBehavior alloc] initWithItems:@[icon] mode:UIPushBehaviorModeInstantaneous];
+            double rx = ((arc4random_uniform(100) / 50.0) - 1.0) * 0.4;
+            double ry = -((arc4random_uniform(100) / 100.0) * 0.5);
+            push.pushDirection = CGVectorMake(rx, ry);
+            [animator addBehavior:push];
+        }
     } else {
         isZeroGravActive = NO;
         [animator removeAllBehaviors];
         animator = nil;
         gravity = nil;
 
-        if (activeContainer && originalCenters) {
+        if (floatingIcons && originalParents && originalFrames) {
             [UIView animateWithDuration:0.35 animations:^{
-                for (UIView *sub in activeContainer.subviews) {
-                    NSValue *key = [NSValue valueWithPointer:(__bridge const void *)(sub)];
-                    NSValue *centerVal = originalCenters[key];
-                    if (centerVal) {
-                        sub.transform = CGAffineTransformIdentity;
-                        sub.center = [centerVal CGPointValue];
+                for (UIView *icon in floatingIcons) {
+                    NSValue *key = [NSValue valueWithPointer:(__bridge const void *)(icon)];
+                    UIView *parent = originalParents[key];
+                    NSValue *frameVal = originalFrames[key];
+                    if (parent && frameVal) {
+                        icon.transform = CGAffineTransformIdentity;
+                        [icon removeFromSuperview];
+                        icon.frame = [frameVal CGRectValue];
+                        [parent addSubview:icon];
                     }
                 }
             } completion:^(BOOL finished) {
-                [activeContainer layoutIconsNow];
-                activeContainer = nil;
+                for (UIView *parent in [originalParents allValues]) {
+                    if ([parent respondsToSelector:@selector(layoutIconsNow)]) {
+                        [(SBIconListView *)parent layoutIconsNow];
+                    }
+                }
+                floatingIcons = nil;
+                originalParents = nil;
+                originalFrames = nil;
             }];
         }
     }
@@ -121,7 +142,7 @@ static void toggleZeroGrav(void) {
         }
 
         if (isZeroGravActive && gravity) {
-            gravity.gravityDirection = CGVectorMake(x * 2.2, -y * 2.2);
+            gravity.gravityDirection = CGVectorMake(x * 2.5, -y * 2.5);
         }
     }];
 }
@@ -129,12 +150,12 @@ static void toggleZeroGrav(void) {
 
 %hook SBIconListView
 - (void)layoutSubviews {
-    if (isZeroGravActive && self == activeContainer) return;
+    if (isZeroGravActive) return;
     %orig;
 }
 
 - (void)layoutIconsNow {
-    if (isZeroGravActive && self == activeContainer) return;
+    if (isZeroGravActive) return;
     %orig;
 }
 
