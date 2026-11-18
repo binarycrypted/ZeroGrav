@@ -1,0 +1,23 @@
+name: Build Tweak
+on: [push, workflow_dispatch]
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Theos and SDK
+        run: |
+          git clone --recursive https://github.com ~/theos
+          mkdir -p ~/theos/sdks
+          curl -L https://github.com -o sdks.zip
+          unzip -q sdks.zip "sdks-master/iPhoneOS9.3.sdk/*" -d ~/theos/sdks/
+          mv ~/theos/sdks/sdks-master/iPhoneOS9.3.sdk ~/theos/sdks/
+      - name: Build Package
+        run: |
+          export THEOS=~/theos
+          make package FINALPACKAGE=1
+      - name: Upload DEB
+        uses: actions/upload-artifact@v4
+        with:
+          name: ZeroGrav-deb
+          path: packages/*.deb
